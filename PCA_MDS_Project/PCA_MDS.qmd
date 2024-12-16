@@ -1,0 +1,500 @@
+---
+title: "Projekt 1. PCA i MDS"
+date: today
+author: "Mikołaj Ziółkowski"
+editor: visual
+format: 
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    toc-title: Spis Treści
+    number-sections: true
+    number-depth: 3
+    embed-resources: true
+    html-math-method: katex
+    code-tools: true
+    code-block-bg: true
+    code-fold: true
+    code-summary: "Show and hide code"
+    link-external-icon: true
+    link-external-newwindow: true
+    smooth-scroll: true
+    self-contained: true
+    citation: true
+    theme: 
+        dark: solar
+        light: flatly
+    fontsize: 1.0em
+    linestretch: 1.3
+    fig-align: center
+execute: 
+  echo: true
+  error: false
+  warning: false
+  output: true
+editor_options: 
+  chunk_output_type: console
+---
+
+<style type="text/css"> body {text-align: justify} </style>
+
+# Wstęp
+
+## Temat projektu
+
+Dla wybranego zestawu danych wykonać rzetelną PCA oraz MDS. Porównać uzyskane wyniki. W ramach zadania należy przeprowadzić krótką EDA dla wybranego zestawu danych, w sposób edukacyjny opisać poszczególne kroki analizy w obu technikach (w szczególności można wybrać więcej niż jedną technikę MDA) i w podsumowaniu opisać zalety i wady obu podejść, jednocześnie próbując porównać uzyskane wyniki.
+
+## Objaśnienia:
+
+**PCA** <br> Principal Component Analysis. Analiza składowych głównych to narzędzie wykorzystywane do zmniejszenia wymiaru danych.
+
+**Celem PCA** <br> jest wyjaśnienie większości zmienności w zbiorze danych przy użyciu mniejszej liczby zmiennych.
+
+**Idea** <br> znalezienie nowego układu współrzędnych, czyli składowych głównych będących liniowymi kombinacjami oryginalnych zmiennych, które będą wyjaśniały jak największą część zmienności w danych.
+
+::: callout-note
+PCA ma sens tylko, gdy dane są w istotnym stopniu skorelowane.
+:::
+
+**MDS** <br> Multidimensional Scaling (skalowanie wielowymiarowe) to metoda wizualizacji i redukcji wymiarów danych, której celem jest odwzorowanie obiektów w przestrzeni o mniejszej liczbie wymiarów, tak aby odległości między nimi były jak najbardziej zbliżone do oryginalnych odległości w wyższowymiarowej przestrzeni.
+
+**Celem MDS** <br> jest zachowanie relacji między obiektami (np. odległości lub podobieństw) w zredukowanej przestrzeni wymiarów, umożliwiając łatwiejszą interpretację danych.
+
+**Idea** <br> polega na minimalizacji różnicy (współczynnika STRESS-u) między oryginalną macierzą odległości a odległościami w nowej, niżej wymiarowej przestrzeni, dzięki czemu struktura danych pozostaje zachowana.
+
+## Dane
+
+Dane użyte w projekcie to statystki drużyn NBA z lat 1996-97. <br> Źródło: https://www.nba.com/stats/teams/traditional?Season=1996-97
+
+**Zmienne:** <br> 1) L.P -\> liczba porządkowa <br> 2) Team -\> nazwa drużyny <br> 3) WIN% -\> procent wygranych <br> 4) FG% -\> procent celnych rzutów z pola <br> 5) 3P% -\> procent celnych rzutów za 3 punkty <br> 6) FT% -\> Procent rzutów wolnych <br> 7) PTS -\> zdobyte punkty
+
+# EDA
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+library(readxl)
+library(dplyr)
+library(corrplot)
+library(ggplot2)
+library(reshape2)
+library(psych)
+library(factoextra)
+library(kableExtra)
+library(MASS)
+library(rgl)
+library(plotly)
+library(htmlwidgets)
+
+NBA_DANE <- read_excel("C:/Users/mikol/OneDrive/Desktop/SAD_Projekt/NBA_DANE_1996_7.xlsx")
+
+data <- NBA_DANE %>%
+  mutate(
+   `WIN%` = as.numeric(`WIN%`),
+    PTS = as.numeric(PTS),
+    `FG%` = as.numeric(`FG%`),
+    `3P%` = as.numeric(`3P%`),
+    `FT%` = as.numeric(`FT%`),
+  )
+
+data$`WIN%` <- data$`WIN%` / 100
+data$`FG%` <- data$`FG%` / 100
+data$`FT%` <- data$`FT%` / 100
+data$`3P%` <- data$`3P%` / 100
+View(data)
+
+```
+
+## Dane:
+
+Do analizy PCA i MDS wykorzystuje się tylko dane numeryczne, a więc do dalszego badania wezmę pod uwagę zmienne: WIN%, FG%, 3P%, FT%, PTS. Obecna struktura danych posiada 5 kolumn oraz 29 wierszy.
+
+Poniżej pierwsze 6 rekordów:
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+numeric_data <- data[, sapply(data, is.numeric)]
+numeric_data <- numeric_data[, !colnames(numeric_data) %in% "L.P"] 
+
+head_data <- head(numeric_data)
+
+kable(head_data, caption = "Pierwsze 6 rekordów") %>%
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+## Statystyki opisowe
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+# współczynnik zmienności
+var_coef <- function(x) {
+  y = sd(x, na.rm = TRUE) / mean(x, na.rm = TRUE) * 100
+  return(y)
+}
+
+# statystyk opisowych
+summary_stats <- lapply(numeric_data, function(x) {
+  descr <- describe(x, na.rm = TRUE)
+  data.frame(
+    Średnia = descr$mean,
+    Mediana = median(x, na.rm = TRUE),
+    Min = descr$min,
+    Max = descr$max,
+    Odchylenie_standardowe = descr$sd,
+    Współczynnik_zmienności = var_coef(x),
+    Skośność = descr$skew,
+    Kurtoza = descr$kurtosis
+  )
+})
+
+summary_df <- do.call(rbind, summary_stats)
+colnames(summary_df) <- c("Średnia", "Mediana", "Min", "Max", "Odchylenie standardowe", "Współczynnik zmienności", "Skośność", "Kurtoza")
+
+knitr::kable(round(summary_df, 3),
+                      row.names = TRUE, 
+                      caption = "Tabela 2. Statystyki opisowe", 
+                      align = "c", 
+                      booktabs = TRUE) %>%
+  kable_styling(latex_options = "hold_position", 
+                bootstrap_options = "bordered") %>%
+  row_spec(0, extra_css = "vertical-align: middle;") %>%
+  column_spec(column = 1:9, width = "3in")
+
+
+```
+
+**Wnioski:** <br> 1) Proporcja zwycięstw drużyn waha się od 17.1% do 84.1%, ze średnią na poziomie 50%, co wskazuje na to, iż średnio dana drużyna ma 50% zwycieństw oraz 50% porażek na sezon. Drużyny mają dużą różnorodność skuteczności w tym sezonie. Zmienna WIN% charakteryzuje się dość wysoką zmiennością, a tym samym dużą różnorodnością wyników między drużynami.Skośność bliska zeru wskazuje na symetryczny rozkład, a ujemna kurtoza na bardziej płaski rozkład niż normalny. <br> 2) Skuteczność rzutuów z gry wynosi od 42.2% do 50.4%. Odchylenie standardowe jest dość niskie, co wskazuje na stabilność tej statystyki między dużynami.Niski wso. zmiennosci potwierdza niewielkie róznice w skutecznosci rzutów. Rozkład bardziej spiczasty niż normalny, a dodatnia skośność wskazuje na prawostronną asymetrię. <br> 3) Procent rzutów za trzy punkty wynosi od 31.9% do 42.8%, co wskazuje na dość wysoką skuteczność w tej kategorii. Współczynnik zmienności sugeruje umiarkowaną różnorodność w skuteczności rzutów za trzy puntky. <br> 4) Średnia skuteczność rzutów wolnych wynosi 73,81%, co jest wysokim wynikiem w tej kategorii. Niski współczynnik zmienności wskazuje na stabilność wyników między drużynami. <br> 5) Średnia liczba punktów wynosi 96.9, z niskim odch. standardowym, co wskazuje na stabilność wyników punktowych między drużynami. Współczynnik zmienności sugeruje niską różnorodność.
+
+## Korelacja
+
+Korelacje pomiędzy zmiennymi wskazują na brak współliniowości, a tym samym brak silnej zależności korelacyjnej między zmiennymi.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+corr_matrix <- cor(numeric_data)
+
+corr_matrix_table <- as.data.frame(round(corr_matrix, 2))
+
+kable(corr_matrix_table, caption = "Macierz korelacji dla zmiennych") |> 
+  kable_styling(full_width = TRUE, bootstrap_options = c("striped", "hover"))
+```
+
+## Wartości odstające
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+melted_data <- melt(numeric_data)
+
+ggplot(melted_data, aes(x = variable, y = value)) +
+  geom_boxplot(fill = "lightgreen") +
+  theme_minimal() +
+  facet_wrap(~variable, scales = "free", ncol = 3) +
+  labs(title = "Boxploty dla zmiennych", x = "Zmienna", y = "Wartość")
+
+```
+
+Jak widać z powyższych wykresów boxplot, prawie żadna zmienna nie posiada wartości odstających, poza zmienną 3P%. Po przeprowadzeniu wstępnej analizy projektu, stwierdzam, iż wartości odstające dla tej zmiennej nieznacznie wpływają na wynniki PCA oraz MDS, dlatego decyduje się na pozostawienie tych wartości w obecnej formie.
+
+# PCA
+
+## Testy
+
+**Test Bartletta** <br> Sprawdza, czy macierz korelacji różni się od macierzy jednostkowej. W macierzy jednostkowej zmienne są nieskorelowane (wartości na przekątnej to 1, reszta to 0). Służy do sprawdzenia, czy macierz korelacji wskazuje na wystarczające powiązanie zmiennych (hipoteza zerowa tego testu zakłada, że zmienne nie są ze sobą dostatecznie powiązane).
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+cortest.bartlett(corr_matrix, n = nrow(numeric_data))
+```
+
+p-value posiada bardzo małą wartość, a więc odrzucamy hipoteze H0. Oznacza to, że zmienne są skorelowane w wystarczającym stopniu, aby PCA było sensowne.
+
+**Wskaźnik KMO (Kaiser-Meyer-Olkin)** <br> Ocenia, czy próbka danych jest wystarczająco odpowiednia do analizy czynnikowej lub PCA. Oblicza proporcję wariancji wspólnej zmiennych względem wariancji całkowitej.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+KMO(corr_matrix)
+```
+
+Overall MSA = 0.68 jest akceptowalne , ponieważ znajduje się powyżej poziomu 0.6, a tym samym można wskazać, iż wystarczająca ilość zmiennych współdzieli wystarczającą ilość wariancji.
+
+## Analiza PCA
+
+1)  Aby wszystkie zmienne miały porównywalne jednostki, dokonuje się w pierwszym kroku standaryzacji zmiennych.
+2)  Następnie na podstawie danych zestandaryzowanych oblicza się PCA, czyli przekształca się orginalne zmienne w nowy zestaw składowych głównych
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+dane_cs <- scale(numeric_data, center=TRUE, scale=TRUE)
+pca <- prcomp(dane_cs)
+pca
+```
+
+3)  PCA porządkuje składowe według tego, ile wariancji każda z nich wyjaśnia.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+pca$sdev^2
+```
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+summary(pca)
+```
+
+4)  Wykres przedstawiający proporcję wariancji wyjaśnianej przez kolejne składowe.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+fviz_eig(pca, addlabels = TRUE)
+```
+
+Istnieje wiele metod wyboru składowych. Postanawiam wybrać tyle składowych by wyjaśniały z góry ustaloną część zmienności = 80%. <br> Pierwsza składowa wyjaśnia 50.7% całkowitej wariancji. Dwie pierwsze składowe razem wyjaśniają 68.71%. Natomiast trzy pierwsze składowe zachoują 85.4%, co oznacza, że redukcja wymiaru do 3D zachowuje dużą część informacji. <br> Tym samym należy zachowować pierwsze 3 składowe z wynikiem 85,4%. <br>
+
+### Wektory własne
+
+5)  Następnie sprawdza się udział poszczególnych zmiennych w składowych głównych
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+pca$rotation
+```
+
+<br> <br> 6) Poniższe wykresy udziału zmiennych w każdej składowej pomagają zidentyfikować najważniejsze zmienne. <br> 1) PC1:
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+fviz_contrib(pca, choice="var", axes=1) 
+```
+
+Największe znaczenie mają zmienne FG% i WIN%. Wszystkie zmienne mają wartości ujemne, co oznacza, że są skorelowane w podobnym kierunku. <br> <br> 2) PC2:
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+fviz_contrib(pca, choice="var", axes=2)  
+```
+
+Największy udział mają zmienne FT% i PTS, oraz nieco w mniejszym stopniu WIN%. Ta składowa reprezentuje różnice między skutecznością rzutów wolnych a liczbą punktów. <br> <br> 3) PC3:
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+fviz_contrib(pca, choice="var", axes=3) 
+```
+
+Największy znaczenie w tej składowej ma zmienna 3P%. Ta składowa opisuje głównie udział skuteczności rzutów trzypunktowych w wyjaśnianiu danych. <br> <br> 4) Udział składowych 1-3
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+fviz_contrib(pca, choice="var", axes=1:3)
+```
+
+Jak widać z powyższej grafiki, FT% oraz 3P% mają największy wkład w wyjaśnienie zmienności w pierwszych trzech składowych głównych, te zmienne są szczególnie istotne dla różnicowania danych w przestrzeni PCA. Zmienne WIN%, PTS, FG% również znacząco przyczyniają się do wyjaśnienia zmienności, ale ich wkład jest nieco mniejszy niż FT% i 3P%.
+
+### Ładunki czynnikowe
+
+<br>
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+fviz_pca_var(pca)
+```
+
+<br> 7) Ładunki czynnikowe: <br>
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+cor(numeric_data, pca$x[,1:3]) 
+```
+
+Współrzędne końca wektora to odpowiadające im ładunki czynnikowe zmiennych. Jak widać z ilustracji i tabeli ładunków czynnikowych, prawie wszystkie wartości w PC1 i PC2 są ujemne poza wartosciami Dim2 dla PTS i FT%. Dłuższe wektory takie jak WIN% i FG% oznaczają większą informacyjność zmiennej. Wektory wskazują podobne kierunki są silnie skorelowane dodatnio, np: WIN% i FG%, natomiast skierowanie WIN% i FT% wskazuje na słabe skorelowanie dodatnie. Małe kąty między FG%, 3P% i WIN% wskazują na silną korelację, jak również między PTS i FT%. Jednak już kąt np: między WIN% a FT% wskazuje na słabszą korelacje tych zmiennych. Pierwsz składowa wyjaśnia 50.7% zmienności, natomiast druga składowa 18% zmienności, co łącznie daje wynik 68.7%.
+
+### Zasób zmienności wspólnej
+
+8)  Kwadraty współczynników korelacji
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+fl_squared <- cor(numeric_data, pca$x[,1:3])^2 
+
+fl_squared <- cbind(fl_squared, Total = rowSums(fl_squared))
+
+fl_squared
+
+```
+
+Sumując wartości w wierszach, można określić, jaka część całkowitej wariancji zmiennych pierwotnych jest wyjaśniana przez składowe główne.
+
+Procent wariancji zmiennej pierwotnej wyjaśniony przez składowe główne: - WIN% 84% - FG% 82% - 3P% 89% - FT% 89% - PTS 83%
+
+Jak widać wszystkie zmiennej są wyjaśniane przez składowe główne powyżej 80%, co stanowi dość dobry wynik. <br> **PC1** Największy zasób wspólnej zmienności wyjaśniają zmienne FG% i WIN%, co potwierdza ich kluczowy wpływ na PC1. <br> **PC2** FT% wyjaśnia największą część zmienności wspólnej PC2. PTS oraz WIN% mają mniejszy wpływ. <br> **PC3** Największą zmienność wspólną z PC3 wyjaśnia zmienna 3P%, co wskazuje na jej istotność dla tej składowej.
+
+### Wnioski z PCA
+
+Celem PCA jest wyjaśnienie większości zmienności w zbiorze danych przy użyciu mniejszej liczby zmiennych. <br> Pierwsze składowe główne (PC1, PC2, PC3) wyjaśniają większość wariancji danych. Na podstawie powyższej analizy można zauważyć, iż PC1 wyjaśnia 50.7%, PC2 18%, a PC3 kolejne 16.7%. Oznacza to, że trzy pierwsze składowe pokrywają razem 85.4% całkowitej zmienności danych, co sugeruje, że są wystarczające do reprezentacji danych. Pozostałe składowe mogą mieć niewielki wpływ i być mniej istotne. <br> Wektory (ładunki czynnikowe) wskazują na najważniejsze zmienne w analizie: - WIN%, FG% są kluczowe dla PC1, co sugeruje, że te zmienne mają największy udział w różnicowaniu obserwacji w pierwszej składowej. - FT% jest istotna dla PC2 i reprezentuje dodatkowy wymiar informacji, niezależny od PC1. - 3P% jest ważna dla PC3 Dla analizy oraz struktury danych te zmienne są najbardziej informacyjne. Natomiast najważniejszymi zmiennymi w pierwszych 3 składowych są FT% oraz 3P%.
+
+# MDS
+
+Interpretacja współczynnika STRESS: - \>20% dopasowanie bardzo słabe - 10-20% dopasowanie słabe - 5-10% dopasowanie średnie - 2-5% dopasowanie dobre - 0-2% dopasowanie bardzo dobre - 0% dopasowanie idealne
+
+## Klasyczne skalowanie wielowymiarowe
+
+Ideą klasycznego skalowania wielowymiarowego jest zmniejszenie wymiaru danych przy jak najmniejszym zniekształceniu prawdziwych odległości.
+
+$$
+\text{STRESS} = \sqrt{\frac{\sum_{i,k} (d_{ik} - \hat{d}_{ik})^2}{\sum_{i,k} d_{ik}^2}}
+$$
+
+1)  W pierwszej kolejności oblicza się macierz odległości
+2)  Następnie oblicza się współczynnik STRESSU i na jego podstawie decyduje o redukcji wymiaru.
+
+STRESS mierzy stopień zniekształcenia. Im mniejszy, tym lepiej odwzorowane są odległości.
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+dane_odl <- dist(dane_cs)
+```
+
+### Wymiar R
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+#Wymiar R
+sww1 <- cmdscale(dane_odl, k=1)
+dane_odl_sww1 <- dist(sww1)
+stress <- sqrt(sum((dane_odl - dane_odl_sww1)^2) / sum(dane_odl^2))
+stress
+```
+
+STRESS równy 0.45 oznacza słabe dopasowanie, w ziązku z czym zwiększam wymiar.
+
+### Wymiar R\^2
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+#Wymiar R^2
+sww2 <- cmdscale(dane_odl, k=2)
+dane_odl_sww2 <- dist(sww2)
+stress2 <- sqrt(sum((dane_odl - dane_odl_sww2)^2) / sum(dane_odl^2))
+plot(sww2, xlab = "dim1", ylab="dim2")
+stress2
+```
+
+STRESS równy 0.27 również oznacza bardzo słabe dopasowanie, należy ponownie zwiększyć wymiar
+
+### Wymiar R\^3
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+#Wymiar R^3
+sww3 <- cmdscale(dane_odl, k=3)
+dane_odl_sww3 <- dist(sww3)
+stress3 <- sqrt(sum((dane_odl - dane_odl_sww3)^2) / sum(dane_odl^2))
+stress3
+
+mds_data <- data.frame(
+  dim1 = sww3[, 1],
+  dim2 = sww3[, 2],
+  dim3 = sww3[, 3],
+  Team = data$Team
+)
+
+plot <- plot_ly(
+  data = mds_data,
+  x = ~dim1,
+  y = ~dim2,
+  z = ~dim3,
+  text = ~Team,             
+  type = "scatter3d",       
+  mode = "markers+text",    
+  marker = list(size = 5, color = "blue"), 
+  textposition = 'top center'
+) %>%
+  layout(
+    scene = list(
+      xaxis = list(title = "Dimension 1"),
+      yaxis = list(title = "Dimension 2"),
+      zaxis = list(title = "Dimension 3")
+    ),
+    title = "Wizualizacja MDS 3D z drużynami NBA"
+  )
+
+plot
+
+
+
+```
+
+STRESS równy 0.13, oznacza to dopasowanie słabe. Jednak nie zwiększamy wymiaru ponieważ jest to ostatni rozsądny wymiar do interpretacji. Jak widać z wizualizacji dane są dość rozproszone co może wynikać z słabego dopasowania. Jednakże można zauważyć pewne grupy. Większość klubów skupia się w centrum co wyniki z podobnych statystyk, oraz podobnej skuteczności drużyn, jednak widocznych jest parę odstępstw. Przykładowo drużyny Dallas Mavericks oraz San Antonio Spurs charakteryzują się podobnymi cechami, podobny procent wygranych, niemal identyczna liczba punktów. Można również zauważyć, iż drużyna Charlotte Hornets znajduje się daleko od centrum, drużyna ta charakteryzuje się najlepszą skutecznością rzutów za 3 punkty co znacząco wpływa na jej położenie. Drużyna Cleveland Cavaliers również nieco odstaje od centrum, ma najmniejszą liczbę punktów w tabeli. Również można wyądrębnić grupę z drużynami Phoenix Suns, Houston Rockets, Seattle SuperSonics, Chicago Bulls, Utah Jazz, grupa ta charakteryzuje się najwyższymi wynikami w liczbie punktów w tabeli oraz wysokim procentem wygranych w sezonie
+
+**Wnioski** Najbardziej optymalne będzie zmieniejszenie wymiaru danych do trzeciego wymiaru, jednakże nadal jest to słabe dopasowanie.
+
+## Metoda skalowania Sammona
+
+W metodzie tej wykorzystywane są odległości metryczne (często odległość euklidesowa). Kładzie większy nacisk na dokładne odwzorowanie małych odległości (odpowiedni dobór wag). <br> Rozwiązuje problem optymalizacyjny, w którym minimalizowany jest błąd:
+
+$$
+E = \frac{1}{\sum_{i < j} d_{ij}} \sum_{i < j} \frac{(d_{ij} - \hat{d}_{ij})^2}{d_{ij}}
+$$
+
+### Wymiar R\^3
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+calculate_sammon <- function(d, d_hat) {
+  dij <- as.vector(as.dist(d))
+  dij_hat <- as.vector(as.dist(d_hat))
+  
+  if (length(dij) != length(dij_hat)) {
+    stop("Macierze odległości muszą mieć te same wymiary!")
+  }
+  
+  numerator <- sum(((dij - dij_hat)^2) / dij)
+  denominator <- sum(dij)
+  
+  E <- numerator / denominator
+  return(E)
+}
+
+dane_odl <- dist(dane_cs)                
+sww3 <- cmdscale(dane_odl, k = 3)        
+dane_odl_sww3 <- dist(sww3)              
+
+stress_sammon <- calculate_sammon(as.matrix(dane_odl), as.matrix(dane_odl_sww3))
+
+stress_sammon
+
+mds_data <- data.frame(
+  dim1 = sww3[, 1],
+  dim2 = sww3[, 2],
+  dim3 = sww3[, 3],
+  Team = data$Team
+)
+
+plot <- plot_ly(
+  data = mds_data,
+  x = ~dim1,
+  y = ~dim2,
+  z = ~dim3,
+  text = ~Team,              
+  type = "scatter3d",        
+  mode = "markers+text",      
+  marker = list(size = 5, color = "blue"), 
+  textposition = 'top center' 
+) %>%
+  layout(
+    title = paste("MDS 3D z Sammon Stress:", round(stress_sammon, 4)),
+    scene = list(
+      xaxis = list(title = "Dimension 1"),
+      yaxis = list(title = "Dimension 2"),
+      zaxis = list(title = "Dimension 3")
+    )
+  )
+
+plot
+
+```
+
+Współczynnik STRESSU równy 0.02 oznacza bardzo dobre dopasowanie. Grupy i wykres podobny jak w metodzie klasycznej.
+
+## Porównanie i wnioski
+
+```{r echo = FALSE, message = FALSE, warning = FALSE}
+stress_classical <- data.frame(
+  Dimensions = c(1, 2, 3),
+  STRESS = c(0.4478183, 0.2669325, 0.1302478),
+  Method = "Classical MDS"
+)
+
+stress_sammon <- data.frame(
+  Dimensions = c(1,2,3),
+  STRESS = c(0.2379287, 0.08670455, 0.02364176),
+  Method = "Sammon's Mapping"
+)
+
+stress_results <- rbind(stress_classical, stress_sammon)
+
+knitr::kable(stress_results, caption = "Współczynniki STRESS dla klasycznego MDS i metody Sammona")
+```
+
+W przypadku klasycznego skalowania wielowymiarowego, dla wymiaru 3 STRESS wynosi 0.1302, co oznacza słabe dopasowanie (10–20%). Ostatecznie wymiar 3 jest ostatnim rozsądnym wymiarem do analizy. Wyższe wymiary mogłyby poprawić STRESS, ale interpretacja takich przestrzeni jest nierozważna.
+
+Jednak warto zwrócić uwagę, iż w przypadku metody Sammona, przy wymiarze 3 STRESS wynosi 0,02, co oznacza bardzo dobre dopasowanie. Metoda Sammona jest w tym przypadku znacznie lepsza pod względem dopasowania od klasycznego MDS.
+
+# Wnioski końcowe
+
+W powyższym projekcie przeprowadzono dwie rówżne techniki analizy danych: PCA i MDS, w celu redukcji wymiarowości i eksploracji struktury danych. <br> Celem PCA było wyjaśnienie większości zmienności w danych przy użyciu mniejszej liczby zmiennych. Wyniki wskazują, że trzy pierwsze składowe główne (PC1, PC2, PC3) wyjaśniają łącznie 85.4% całkowitej wariancji danych, co czyni je wystarczającymi do reprezentacji zbioru danych. PCA pozwoliła na identyfikację najważniejszych zmiennych: WIN%, FG%, FT%, 3P%, które są kluczowe dla różnicowania obserwacji. <br> Skalowanie wielowymiarowe zastosowano w dwóch wariantach: klasycznym MDS oraz metodzie Sammona.Klasyczne MDS - W przypadku trzech wymiarów współczynnik STRESS wynosi 0.1302, co oznacza słabe dopasowanie.Metoda Sammona - Dla trzech wymiarów współczynnik STRESS wynosi 0.02364, co wskazuje na bardzo dobre dopasowanie. Metoda Sammona lepiej odwzorowuje lokalne relacje między obserwacjami. <br> Zaletą PCA jest zachowanie maksymalnej zmienności: PCA redukuje wymiar danych, jednocześnie maksymalizując ilość zachowanej wariancji. Wadą natomiast Brak uwzględnienia relacji nieliniowych: PCA zakłada liniowość w danych, co może prowadzić do niewłaściwego odwzorowania bardziej złożonych struktur. <br> Zaleta MDS jest odwzorowanie struktur lokalnych: MDS, szczególnie metoda Sammona, skutecznie odwzorowuje relacje między punktami w lokalnych obszarach. Wadą tej metody natomiast jest słaba interpretacja wyższych wymiarów: Wizualizacja wyników MDS jest trudna, gdy wymiar przekracza 3, co utrudnia analizę większych wymiarów.
