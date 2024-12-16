@@ -17,5 +17,10 @@ Results are compared, visualized, and thoroughly discussed.
 3. Visualization and grouping of teams based on performance.
 
 ## Summary:
-1. Strengths and weaknesses of PCA and MDS.
-2. Comparison of results and interpretation of team relationships.
+Strengths and weaknesses of PCA and MDS. Comparison of results and interpretation of team relationships. PCA effectively reduces data dimensions while retaining 85.4% of total variance in 3 components. Sammon's Mapping MDS provides better local structure preservation compared to classical MDS. The analysis reveals clusters of teams with similar statistics, as well as standout teams based on shooting efficiency and performance metrics.
+
+### Technologies
+- R/RStudio 
+- Quarto (.qmd)
+
+Libraries: ggplot2, plotly, psych, MASS, rgl, dplyr, tidyr
